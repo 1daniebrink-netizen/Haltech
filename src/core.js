@@ -695,35 +695,15 @@ export function throttleLifts(samples, vehicle = VEHICLE) {
   return out;
 }
 
-/**
- * Group the samples matching `pred` into bursts, merging across gaps shorter
- * than `mergeGapS`. Returns [{t0, t1, n}].
+/* burstsOf() / sampleRateHz() lived here briefly, to turn a sample count into an
+ * episode count and a timestamp for the lift-transient warning. That warning is
+ * gone (see checkLimits), so they went with it rather than sit unused.
  *
- * Exists because a SAMPLE COUNT IS NOT AN EVENT COUNT and reporting one as the
- * other makes the analyzer look broken. These logs run at ~170 Hz, so a single
- * 0.18 s spike is 28 consecutive samples; "28 samples ran outside +/-5%" reads
- * as 28 separate events against a graph that plainly shows one peak. Danie hit
- * exactly that on Log3132. Any warning quoting a count should also say how many
- * distinct episodes it was and WHEN, so it can be laid over the trace.
- */
-export function burstsOf(samples, pred, mergeGapS = 0.25) {
-  const out = [];
-  let cur = null;
-  for (const s of samples) {
-    if (!pred(s)) continue;
-    if (cur && s.t - cur.t1 <= mergeGapS) { cur.t1 = s.t; cur.n++; }
-    else { if (cur) out.push(cur); cur = { t0: s.t, t1: s.t, n: 1 }; }
-  }
-  if (cur) out.push(cur);
-  return out;
-}
-
-/** Mean sample rate in Hz, or NaN if it cannot be established. */
-export function sampleRateHz(samples) {
-  if (!samples || samples.length < 2) return NaN;
-  const span = samples[samples.length - 1].t - samples[0].t;
-  return span > 0 ? (samples.length - 1) / span : NaN;
-}
+ * The lesson they encoded is still live and applies to any finding that quotes a
+ * count: a SAMPLE COUNT IS NOT AN EVENT COUNT. These logs run at ~170 Hz, so one
+ * 0.18 s spike is 28 consecutive samples, and "28 samples" reads as 28 separate
+ * events against a graph showing a single peak. If a warning ever needs to quote
+ * a count again, give the episode count and the time alongside it. */
 
 /**
  * Dismiss injector-differential excursions that are the regulator recovering
@@ -974,34 +954,18 @@ export function checkLimits(allSamples, vehicle = VEHICLE, fuel = null) {
    * happened, and Danie reads these back against the trace — if the graph shows
    * a spike the warnings do not mention, the tool looks broken rather than
    * careful. Info severity: it is an observation, not a fault. */
-  const trans = count(s => s.fuelTransient);
-  /* Lead with the EPISODE count and the timestamp, not the sample count — see
-   * burstsOf(). The card header still shows samples, so the first sentence has
-   * to reconcile the two or the reader trusts neither. */
-  const tb = burstsOf(samples, s => s.fuelTransient);
-  const hz = sampleRateHz(samples);
-  const tWhen = tb.map(b => (b.t1 - b.t0) < 0.05
-    ? `${b.t0.toFixed(2)} s`
-    : `${b.t0.toFixed(2)}-${b.t1.toFixed(2)} s`).join(', ');
-  const tSpan = tb.reduce((a, b) => a + (b.t1 - b.t0), 0);
-  add('fuel-lift-transient', 'info', false, trans,
-    `${tb.length} differential excursion${tb.length === 1 ? '' : 's'} dismissed as `
-    + `throttle-lift recovery`,
-    `${tb.length === 1 ? 'One excursion' : `${tb.length} excursions`} at ${tWhen}. `
-    + `That is ${trans} ${tb.length === 1 ? 'consecutive samples' : 'samples in total'}`
-    + (Number.isFinite(hz) ? ` — at ${hz.toFixed(0)} Hz, ${tSpan.toFixed(2)} s of trace, `
-      + `not ${trans} separate events` : '')
-    + `. Each ran outside +/-${tolPct}% of target for less than `
-    + `${vehicle.fuelTransientMaxS} s, starting within ${vehicle.fuelTransientWindowS} s of a `
-    + `throttle fall of more than ${vehicle.fuelTransientLiftDropPct} points. Coming off the `
-    + `throttle collapses fuel demand faster than the regulator can dump the rail, so the `
-    + `differential overshoots while it recovers. Peak `
-    + `${kpaToPsiDiff(peak(s => s.fuelTransient, s => s.fuelDiff)).toFixed(1)} psi across the `
-    + `injector against ${tgtPsi(s => s.fuelTransient).toFixed(1)} psi called for `
-    + `(${peak(s => s.fuelTransient, s => s.fuelDevPct).toFixed(1)}%). Not counted against the `
-    + `regulator. The excursion is still drawn on the graph. Note this keys on the THROTTLE: a `
-    + `spike thrown by a gear shift, where demand collapses with the throttle still open, is not `
-    + `covered and will still be reported above.`);
+  /* There is deliberately NO warning for lift-recovery transients.
+   *
+   * They were reported at `info` for one version and Danie had it removed: a
+   * dismissed excursion needs no attention, so a card saying "28 samples were
+   * dismissed" is noise in a panel he reads for things to act on. The rule for
+   * this panel is now explicit — EVERY finding here must require attention or
+   * action. `info` has no place in it, and `fuel-lift-transient` is the only
+   * finding that was ever that severity.
+   *
+   * The suppression itself still happens in markFuelLiftTransients(); the
+   * samples keep `fuelTransient` and still draw on the graph. It is only the
+   * verdict card that is gone. artifact/check.mjs asserts it stays gone. */
 
   const bad = count(s => s.implausible);
   add('sensor-implausible', 'critical', true, bad,

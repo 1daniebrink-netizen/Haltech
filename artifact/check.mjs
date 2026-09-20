@@ -475,6 +475,55 @@ else {
     fail('a log with no wideband should still get the name');
 }
 
+/* ---- lift transients are suppressed SILENTLY ------------------------------
+ * Two halves, and both have to hold:
+ *   1. the excursion is still dismissed (annotateLimits clears the fuel flags),
+ *   2. nothing is REPORTED about it.
+ * The second half is the one with history. The suppression first shipped with an
+ * `info` card saying "28 samples were dismissed as throttle-lift recovery", and
+ * Danie had it removed: the warnings panel is for things needing attention, and
+ * a dismissed excursion by definition needs none.
+ *
+ * The rule is about PURPOSE, not the severity label. An earlier version of this
+ * check banned `info` outright and was wrong: `overrun-gate-fallback` is info and
+ * belongs, because it ends by asking for an action ("Log Injector 1 Duty Cycle
+ * for the direct test"). 44 of the 105 logs raise it. So assert the one card is
+ * gone, and leave severity alone. */
+{
+  const { extractSamples, annotateLimits, checkLimits, VEHICLE } = await import('../src/core.js');
+  const fail = m => { console.log('  *** ' + m + ' ***'); process.exitCode = 1; };
+  const names = ['RPM', 'Throttle Position', 'Manifold Pressure', 'Fuel Pressure',
+                 'Fuel Pressure Expected', 'Injector 1 Duty Cycle', 'Wideband O2 1',
+                 'Target Lambda'];
+  /* Channels are declared Raw so decode() is the identity — these are already in
+   * real units. Getting that wrong reads throttle 970 as 970%, which trips the
+   * plausibility bound and buries the thing under test. */
+  //                     rpm,  tps, map, fuelP, expected, duty, wb,   tgt
+  const row = (t, v) => ({ t, values: v });
+  const wot = [6000, 97, 250, 650, 650, 30, 0.85, 0.80];   // diff 400 vs target 400
+  const lift = [4000, 0, 40, 740, 440, 8, 0.90, 1.00];     // diff 700 vs target 400 = +75%
+  const calm = [4000, 0, 40, 440, 440, 8, 0.99, 1.00];     // back in band
+  const rows = [];
+  for (let i = 0; i < 300; i++) rows.push(row(i * 0.006, wot));            // WOT, in band
+  for (let i = 0; i < 30; i++) rows.push(row(1.8 + i * 0.006, lift));      // lift + spike
+  for (let i = 0; i < 300; i++) rows.push(row(2.0 + i * 0.006, calm));     // recovered
+  const log = { channels: names.map(name => ({ name, type: 'Raw' })),
+                byName: Object.fromEntries(names.map((n, i) => [n, i])), rows, meta: {} };
+  const { samples, fuel } = extractSamples(log);
+  annotateLimits(samples, VEHICLE, fuel);
+  const trans = samples.filter(s => s.fuelTransient);
+  if (!trans.length) fail('the lift spike was not recognised as a transient at all');
+  if (trans.some(s => s.fuelOverPressure || s.fuelStarved))
+    fail('a transient sample kept its fuel flag - suppression is not working');
+  const w = checkLimits(samples, VEHICLE, fuel);
+  console.log('lift transient: ' + trans.length + ' samples suppressed, '
+    + w.length + ' warning(s) raised [' + (w.map(x => x.id).join(' ') || 'none') + ']');
+  if (w.some(x => x.id === 'fuel-lift-transient'))
+    fail('the dismissed-transient card is back - Danie asked for it gone');
+  if (w.length)
+    fail('a suppressed lift transient must raise NOTHING, got: ' + w.map(x => x.id).join(' '));
+}
+
 /* ---- engine protection derived from the actuators, and the code-4 name -----
  * The ECU-download logs carry no Engine Protection channels, so that column
  * read "—" on exactly the row where protection had fired. It is inferred from
