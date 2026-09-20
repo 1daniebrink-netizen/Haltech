@@ -1,0 +1,178 @@
+<title>Haltune — Haltech Log Analyzer</title>
+<style>
+  :root {
+    --ground: #0d0f12; --panel: #14181d; --panel-2: #1a1f26; --line: #262d35;
+    --text: #e6edf3; --muted: #8b98a5; --faint: #5c6773;
+    --accent: #ff8c42;
+    --rich: #3aa0ff; --ontarget: #35c46a; --warn: #ffb020; --crit: #ff4d4d;
+    --shadow: 0 1px 0 rgba(255,255,255,.03), 0 8px 24px rgba(0,0,0,.35);
+    --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --r: 10px;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --ground: #eef1f4; --panel: #ffffff; --panel-2: #f5f7f9; --line: #dbe1e8;
+      --text: #10151b; --muted: #55616e; --faint: #8a95a1;
+      --shadow: 0 1px 2px rgba(16,21,27,.06), 0 8px 24px rgba(16,21,27,.08);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0d0f12; --panel: #14181d; --panel-2: #1a1f26; --line: #262d35;
+    --text: #e6edf3; --muted: #8b98a5; --faint: #5c6773;
+    --shadow: 0 1px 0 rgba(255,255,255,.03), 0 8px 24px rgba(0,0,0,.35);
+  }
+  :root[data-theme="light"] {
+    --ground: #eef1f4; --panel: #ffffff; --panel-2: #f5f7f9; --line: #dbe1e8;
+    --text: #10151b; --muted: #55616e; --faint: #8a95a1;
+    --shadow: 0 1px 2px rgba(16,21,27,.06), 0 8px 24px rgba(16,21,27,.08);
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ground); color: var(--text); font-family: var(--sans);
+    line-height: 1.5; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 22px clamp(14px, 3vw, 30px) 80px; }
+
+  .label { font-family: var(--mono); text-transform: uppercase; letter-spacing: .1em;
+    font-size: 11px; color: var(--muted); }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  /* ---- masthead ---- */
+  header.top { display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    flex-wrap: wrap; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+  .brand { display: flex; align-items: baseline; gap: 12px; }
+  .brand h1 { margin: 0; font-family: var(--mono); font-size: 26px; letter-spacing: .16em;
+    font-weight: 700; }
+  .brand h1 .dot { color: var(--accent); }
+  .brand .tag { color: var(--muted); font-size: 13px; }
+  .top-actions { display: flex; gap: 10px; align-items: center; }
+
+  button, .btn { font-family: var(--sans); font-size: 13px; color: var(--text);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 13px; cursor: pointer; transition: border-color .15s, background .15s; }
+  button:hover, .btn:hover { border-color: var(--accent); }
+  button:focus-visible, .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn.primary { background: var(--accent); color: #1a1200; border-color: var(--accent); font-weight: 600; }
+
+  /* ---- dropzone ---- */
+  .drop { margin: 24px 0; border: 1.5px dashed var(--line); border-radius: var(--r);
+    background: var(--panel); padding: 44px 20px; text-align: center; transition: border-color .15s, background .15s; }
+  .drop.hot { border-color: var(--accent); background: var(--panel-2); }
+  .drop h2 { margin: 0 0 6px; font-size: 18px; }
+  .drop p { margin: 4px 0; color: var(--muted); font-size: 13px; }
+  .drop input { display: none; }
+
+  section { margin-top: 26px; }
+  .sec-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .sec-head h3 { margin: 0; font-size: 15px; letter-spacing: .02em; }
+  .sec-head .count { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .rule { flex: 1; height: 1px; background: var(--line); }
+
+  /* ---- stat strip ---- */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r);
+    padding: 13px 15px; box-shadow: var(--shadow); }
+  .stat .k { font-size: 22px; font-weight: 650; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .stat .k small { font-size: 12px; color: var(--muted); font-weight: 400; margin-left: 3px; }
+  .stat .l { margin-top: 3px; }
+  .stat.alert .k { color: var(--crit); }
+  .stat.good .k { color: var(--ontarget); }
+
+  /* ---- danger cards ---- */
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+  .card { position: relative; background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--r); padding: 13px 15px 13px 18px; box-shadow: var(--shadow); overflow: hidden; }
+  .card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--sev, var(--warn)); }
+  .card .cond { font-family: var(--mono); font-size: 15px; font-weight: 650; }
+  .card .detail { color: var(--muted); font-size: 12.5px; margin-top: 5px; font-family: var(--mono); }
+  .card .fix { margin-top: 9px; font-size: 13px; }
+  .card .fix b { color: var(--accent); font-family: var(--mono); }
+  .pill { display: inline-block; font-family: var(--mono); font-size: 10.5px; text-transform: uppercase;
+    letter-spacing: .06em; padding: 2px 7px; border-radius: 20px; border: 1px solid var(--line); color: var(--muted); }
+  .pill.crit { color: var(--crit); border-color: color-mix(in srgb, var(--crit) 45%, transparent); }
+  .pill.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+
+  /* ---- panels ---- */
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r);
+    padding: 16px; box-shadow: var(--shadow); overflow-x: auto; }
+
+  /* ---- heatmap ---- */
+  .hm { display: inline-grid; gap: 2px; font-family: var(--mono); }
+  .hm .cell { min-width: 46px; height: 40px; border-radius: 4px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; font-size: 11px; color: #06121f; position: relative; cursor: default; }
+  .hm .cell.empty { background: var(--panel-2); color: var(--faint); box-shadow: inset 0 0 0 1px var(--line); }
+  .hm .cell .v2 { font-size: 9px; opacity: .8; }
+  .hm .axis { color: var(--muted); font-size: 10.5px; display: flex; align-items: center; justify-content: center; min-width: 46px; height: 40px; }
+  .hm .axis.corner { flex-direction: column; gap: 2px; font-size: 9px; text-align: center; }
+  .hm .cell:hover { outline: 2px solid var(--text); z-index: 2; }
+  .axtitle { font-size: 10.5px; }
+
+  .legend { display: flex; align-items: center; gap: 8px; margin: 10px 2px 0; flex-wrap: wrap; font-size: 11px; color: var(--muted); }
+  .legend .bar { height: 10px; width: 180px; border-radius: 5px;
+    background: linear-gradient(90deg, var(--rich), var(--ontarget) 50%, var(--warn) 78%, var(--crit)); }
+
+  /* ---- table ---- */
+  table.grid { border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
+  table.grid th, table.grid td { border: 1px solid var(--line); padding: 5px 8px; text-align: right; font-variant-numeric: tabular-nums; }
+  table.grid th { color: var(--muted); font-weight: 500; background: var(--panel-2); position: sticky; }
+  table.grid td.rowh, table.grid th.rowh { text-align: left; color: var(--muted); background: var(--panel-2); }
+
+  /* ---- controls ---- */
+  .controls { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; background: var(--panel);
+    border: 1px solid var(--line); border-radius: var(--r); padding: 12px 16px; }
+  .ctl { display: flex; flex-direction: column; gap: 3px; }
+  .ctl label { font-size: 11px; }
+  .ctl input[type=range] { width: 130px; accent-color: var(--accent); }
+  .ctl .val { font-family: var(--mono); font-size: 12px; color: var(--text); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { border: none; border-radius: 0; padding: 6px 12px; background: transparent; }
+  .seg button.on { background: var(--accent); color: #1a1200; }
+  .toggle { display: flex; align-items: center; gap: 7px; font-size: 12.5px; cursor: pointer; }
+
+  canvas { max-width: 100%; }
+
+  /* ---- tooltip ---- */
+  #tip { position: fixed; pointer-events: none; z-index: 50; background: var(--panel-2);
+    border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; font-family: var(--mono);
+    font-size: 11.5px; line-height: 1.55; box-shadow: var(--shadow); opacity: 0; transition: opacity .1s; max-width: 260px; }
+  #tip .t-h { color: var(--accent); margin-bottom: 4px; }
+  #tip .t-r { display: flex; justify-content: space-between; gap: 14px; color: var(--muted); }
+  #tip .t-r b { color: var(--text); font-weight: 500; }
+
+  .hidden { display: none !important; }
+  .foot { margin-top: 40px; color: var(--faint); font-size: 11px; font-family: var(--mono); border-top: 1px solid var(--line); padding-top: 14px; }
+  .note { color: var(--muted); font-size: 12.5px; }
+  .err { color: var(--crit); font-family: var(--mono); font-size: 13px; }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <h1>HALTUNE<span class="dot">.</span></h1>
+      <span class="tag">Haltech NSP log analyzer &mdash; AFR &amp; boost tuning advisor</span>
+    </div>
+    <div class="top-actions">
+      <button id="themeBtn" title="Toggle theme">◐ Theme</button>
+      <label class="btn" for="fileTop">Open log&hellip;</label>
+    </div>
+  </header>
+
+  <div class="drop" id="drop">
+    <input type="file" id="fileTop" accept=".csv" />
+    <h2>Drop an NSP data log here</h2>
+    <p>or <label for="fileTop" style="color:var(--accent); cursor:pointer; text-decoration:underline">browse for a .csv</label></p>
+    <p class="note">Everything runs in your browser &mdash; your tune data never leaves this machine.</p>
+  </div>
+
+  <div id="err" class="err hidden"></div>
+  <main id="app" class="hidden"></main>
+
+  <div class="foot" id="foot"></div>
+</div>
+
+<div id="tip"></div>
+
+<script>
+/*__CORE__*/
+/*__APP__*/
+</script>

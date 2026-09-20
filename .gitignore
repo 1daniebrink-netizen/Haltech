@@ -1,0 +1,13 @@
+# Build output of `node build.mjs` — regenerable from src/ alone.
+dist/
+
+# artifact/haltune.html and artifact/logs.json are deliberately NOT ignored.
+# They are generated, but only from log CSVs that live outside this repo (in
+# OneDrive), so a fresh clone could not rebuild them. artifact/check.mjs also
+# runs against haltune.html. Keeping them tracked is what makes the repo
+# self-contained; see docs in the project notes.
+
+node_modules/
+*.log
+Thumbs.db
+.DS_Store

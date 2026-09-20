@@ -1,0 +1,9 @@
+# Keep LF everywhere. tools/build-artifact.mjs inlines src/core.js into
+# artifact/haltune.html as text, and artifact/check.mjs asserts the two match
+# exactly. Letting Windows check one out as CRLF and compare it against the
+# other is a way to fail that gate for no real reason.
+* text=auto eol=lf
+
+*.jpeg binary
+*.jpg  binary
+*.png  binary

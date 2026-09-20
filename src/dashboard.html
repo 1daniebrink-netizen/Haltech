@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Haltune — log dashboard</title>
+<style>
+/* ---- tokens: light is the default, dark is a deliberate second set ------- */
+:root{
+  --surface:#ffffff; --panel:#f7f8fa; --panel-2:#eef1f5;
+  --ink:#12151a; --ink-2:#4a5260; --ink-3:#7a8494;
+  --grid:#e3e7ed; --axis:#c6cdd6; --edge:#dfe4ea;
+  /* categorical — fixed order, never cycled. Okabe-Ito derived. */
+  --s1:#0072b2; --s2:#cc79a7;
+  /* overlay — a reference layer, deliberately outside the categorical order */
+  --ovl:#009e73;
+  /* status — reserved; never used as a series colour */
+  --good:#2e7d32; --warn:#b26a00; --crit:#b4232a;
+  --good-bg:#e8f3e9; --warn-bg:#fbf0dd; --crit-bg:#fbeaea;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --surface:#0f1216; --panel:#171b21; --panel-2:#1e232b;
+    --ink:#e8ecf2; --ink-2:#a8b2c0; --ink-3:#798492;
+    --grid:#262c35; --axis:#3a424d; --edge:#242a33;
+    --s1:#56b4e9; --s2:#e59fcb; --ovl:#5fd3ae;
+    --good:#5cc77f; --warn:#e3a63f; --crit:#ff7a73;
+    --good-bg:#15251a; --warn-bg:#2a2114; --crit-bg:#2c1618;
+  }
+}
+:root[data-theme="light"]{
+  --surface:#ffffff; --panel:#f7f8fa; --panel-2:#eef1f5;
+  --ink:#12151a; --ink-2:#4a5260; --ink-3:#7a8494;
+  --grid:#e3e7ed; --axis:#c6cdd6; --edge:#dfe4ea;
+  --s1:#0072b2; --s2:#cc79a7; --ovl:#009e73;
+  --good:#2e7d32; --warn:#b26a00; --crit:#b4232a;
+  --good-bg:#e8f3e9; --warn-bg:#fbf0dd; --crit-bg:#fbeaea;
+}
+:root[data-theme="dark"]{
+  --surface:#0f1216; --panel:#171b21; --panel-2:#1e232b;
+  --ink:#e8ecf2; --ink-2:#a8b2c0; --ink-3:#798492;
+  --grid:#262c35; --axis:#3a424d; --edge:#242a33;
+  --s1:#56b4e9; --s2:#e59fcb;
+  --good:#5cc77f; --warn:#e3a63f; --crit:#ff7a73;
+  --good-bg:#15251a; --warn-bg:#2a2114; --crit-bg:#2c1618;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--surface); color:var(--ink);
+  font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1280px;margin:0 auto;padding:0 20px 64px}
+
+/* ---- header ------------------------------------------------------------- */
+header{
+  position:sticky;top:0;z-index:20;background:var(--surface);
+  border-bottom:1px solid var(--edge);
+}
+.hdr{max-width:1280px;margin:0 auto;padding:14px 20px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+h1{font-size:15px;font-weight:650;margin:0;letter-spacing:-.01em;white-space:nowrap}
+h1 span{color:var(--ink-3);font-weight:400}
+.grow{flex:1 1 auto}
+select,button{
+  font:inherit;color:var(--ink);background:var(--panel);
+  border:1px solid var(--edge);border-radius:7px;padding:6px 10px;cursor:pointer;
+}
+select:hover,button:hover{background:var(--panel-2)}
+select{max-width:340px}
+button:disabled{opacity:.45;cursor:default}
+
+/* ---- meta + controls ---------------------------------------------------- */
+.meta{color:var(--ink-2);font-size:12.5px;padding:14px 0 0;display:flex;gap:18px;flex-wrap:wrap}
+.meta b{color:var(--ink);font-weight:600}
+.controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:14px 0 4px}
+.hint{color:var(--ink-3);font-size:12px}
+
+/* ---- stat tiles --------------------------------------------------------- */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:10px;margin:14px 0 6px}
+.tile{background:var(--panel);border:1px solid var(--edge);border-radius:10px;padding:12px 13px}
+.tile .k{font-size:11.5px;color:var(--ink-2);text-transform:uppercase;letter-spacing:.045em}
+.tile .v{font-size:25px;font-weight:640;letter-spacing:-.02em;margin:5px 0 1px;font-variant-numeric:tabular-nums}
+.tile .v u{text-decoration:none;font-size:13px;font-weight:500;color:var(--ink-2);margin-left:3px}
+.tile .n{font-size:11.5px;color:var(--ink-3)}
+.tile .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:1px}
+.st-good .dot{background:var(--good)} .st-warning .dot{background:var(--warn)}
+.st-critical .dot{background:var(--crit)} .st-none .dot{background:var(--ink-3)}
+.st-critical{border-color:var(--crit)}
+.st-critical .v{color:var(--crit)}
+.st-warning .v{color:var(--warn)}
+
+/* ---- run summary (drag splits) ------------------------------------------ */
+.drag:not(:empty){border:1px solid var(--edge);border-radius:11px;background:var(--panel);
+  padding:12px 14px;margin:14px 0 6px}
+.dhead{font-size:13px;color:var(--ink-2);margin-bottom:10px;padding-left:9px;
+  border-left:3px solid var(--good)}
+.dhead.roll{border-left-color:var(--warn)}
+.dtab{border-collapse:collapse;font-variant-numeric:tabular-nums}
+.dtab th{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);
+  text-align:right;font-weight:500;padding:2px 16px 4px 0}
+.dtab td{padding:3px 16px 3px 0;text-align:right;font-size:14px}
+.dtab td.d{text-align:left;color:var(--ink-2);font-weight:600}
+.dtab th.d{text-align:left}
+.dtab i{color:var(--ink-3);font-style:normal}
+.dnote{color:var(--ink-3);font-size:11.5px;margin-top:9px}
+/* Two columns inside the one card: splits left, check engine light right. The
+   run summary table is narrow and left a screen-width of dead space beside it. */
+.dcols{display:flex;gap:34px;align-items:flex-start;flex-wrap:wrap}
+.dcol{flex:1 1 340px;min-width:0}
+.dcap{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);
+  margin-bottom:8px}
+.ctab td.c{text-align:left;color:var(--ink);font-weight:600;max-width:340px}
+.ctab td.w{text-align:left;color:var(--ink-2);white-space:nowrap}
+.ctab td.c.raw{color:var(--ink-2);font-weight:500}
+.ctab td.y{color:var(--crit);font-weight:600}
+.ctab td.solid{color:var(--warn);font-weight:600}
+.cclear{font-size:13px;color:var(--good)}
+
+/* ---- warnings ----------------------------------------------------------- */
+.warns{display:grid;gap:8px;margin:16px 0}
+.warn{display:flex;gap:10px;border:1px solid var(--edge);border-radius:9px;padding:10px 12px;background:var(--panel)}
+.warn .ico{font-weight:700;font-size:12px;padding:1px 7px;border-radius:5px;height:fit-content;white-space:nowrap}
+.warn.critical .ico{background:var(--crit-bg);color:var(--crit)}
+.warn.warn-lvl .ico{background:var(--warn-bg);color:var(--warn)}
+.warn.info .ico{background:var(--panel-2);color:var(--ink-2)}
+.warn .tt{font-weight:600;margin-bottom:2px}
+.warn .dd{color:var(--ink-2);font-size:13px}
+.warn .blk{color:var(--crit);font-size:11.5px;font-weight:600;margin-top:3px}
+
+/* ---- graph picker ------------------------------------------------------- */
+.picker{border:1px solid var(--edge);border-radius:11px;background:var(--panel);
+  padding:12px 14px;margin:16px 0 4px;display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap}
+.picker .pk-l{font-size:11.5px;color:var(--ink-2);text-transform:uppercase;
+  letter-spacing:.045em;padding-top:7px;white-space:nowrap}
+.picker select{max-width:280px}
+/* filter + dropdown are one control; they wrap together on a narrow screen */
+.picker .pk-add{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.picker .pk-find{font:inherit;color:var(--ink);background:var(--panel);
+  border:1px solid var(--edge);border-radius:7px;padding:6px 10px;width:170px}
+.picker .pk-find::placeholder{color:var(--ink-3)}
+.picker .pk-find:hover,.picker .pk-find:focus{border-color:var(--ink-3);outline:none}
+.picker .pk-find:disabled{opacity:.45}
+.chips{display:flex;gap:6px;flex-wrap:wrap;flex:1 1 320px}
+.chip{display:inline-flex;align-items:center;gap:6px;background:var(--panel-2);
+  border:1px solid var(--edge);border-radius:20px;padding:4px 6px 4px 11px;font-size:12.5px}
+.chip .n{color:var(--ink-3);font-variant-numeric:tabular-nums;font-size:11px;min-width:12px}
+.chip button{border:0;background:none;padding:0 3px;font-size:14px;line-height:1;
+  color:var(--ink-3);cursor:pointer;border-radius:4px}
+.chip button:hover{color:var(--crit);background:var(--crit-bg)}
+.chip .mv{font-size:11px;color:var(--ink-3)}
+.chip .mv:hover{color:var(--ink)}
+.picker .none{color:var(--ink-3);font-size:12.5px;padding-top:7px}
+
+/* ---- time-window slider (src/charts.js) ---------------------------------
+   A two-thumb range over the whole log. It writes the same S.i0/S.i1 that
+   drag-to-zoom on a chart writes, so the bubbles always show the window the
+   charts are drawing. Keep this block identical to the artifact's copy. */
+#tslider{margin:16px 0 4px}
+#tslider .ts-bar{display:flex;align-items:center;gap:14px;border:1px solid var(--edge);
+  border-radius:11px;background:var(--panel);padding:9px 16px}
+#tslider .ts-cap{font-size:11.5px;text-transform:uppercase;letter-spacing:.045em;
+  color:var(--ink-2);white-space:nowrap}
+#tslider .ts-track{position:relative;flex:1 1 240px;height:16px;margin:0 9px;
+  cursor:pointer;touch-action:none}
+#tslider .ts-track::before{content:'';position:absolute;left:0;right:0;top:6px;height:4px;
+  border-radius:2px;background:var(--panel-2);box-shadow:inset 0 0 0 1px var(--edge)}
+#tslider .ts-fill{position:absolute;top:6px;height:4px;border-radius:2px;background:var(--s1)}
+#tslider .ts-thumb{position:absolute;top:0;width:16px;height:16px;margin-left:-8px;
+  border-radius:50%;background:var(--s1);border:2px solid var(--panel);
+  box-shadow:0 1px 4px rgba(0,0,0,.3);cursor:grab;touch-action:none}
+#tslider .ts-thumb:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+#tslider .ts-thumb.on{cursor:grabbing;transform:scale(1.18)}
+#tslider .ts-lab{font-size:11.5px;color:var(--ink-2);white-space:nowrap;
+  font-variant-numeric:tabular-nums;text-align:right;min-width:250px}
+#tslider .ts-reset{font-size:11.5px;padding:3px 9px}
+@media (max-width:760px){#tslider .ts-bar{flex-wrap:wrap}#tslider .ts-lab{min-width:0}}
+
+/* ---- charts ------------------------------------------------------------- */
+.panel{border:1px solid var(--edge);border-radius:11px;background:var(--panel);margin:10px 0;overflow:hidden}
+.ptitle{display:flex;align-items:baseline;gap:10px;padding:10px 14px 0;flex-wrap:wrap}
+.ptitle h2{font-size:13.5px;font-weight:620;margin:0}
+.ptitle .u{color:var(--ink-3);font-size:12px}
+.legend{margin-left:auto;display:flex;gap:14px}
+.legend i{display:inline-block;width:16px;height:2px;border-radius:1px;margin-right:6px;vertical-align:4px}
+.legend span{font-size:12px;color:var(--ink-2);white-space:nowrap}
+.seg{display:inline-flex;border:1px solid var(--edge);border-radius:7px;overflow:hidden}
+.seg button{border:0;border-radius:0;padding:2px 11px;font-size:12px;line-height:1.7;
+  background:var(--panel);color:var(--ink-3);cursor:pointer}
+.seg button+button{border-left:1px solid var(--edge)}
+.seg button[aria-pressed="true"]{background:var(--panel-2);color:var(--ink);font-weight:650}
+.pnote{padding:3px 14px 0;color:var(--ink-3);font-size:11.5px}
+.phead-r{margin-left:auto;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.phead-r .legend{margin-left:0}
+select.ovl{font-size:12px;padding:3px 7px;max-width:230px;color:var(--ink-2)}
+select.ovl.on{color:var(--ovl);border-color:var(--ovl);font-weight:600}
+.ovlnote{color:var(--ovl)}
+.ovlline{fill:none;stroke:var(--ovl);stroke-width:1.5;stroke-dasharray:6 3;
+  stroke-linejoin:round;stroke-linecap:round;opacity:.9}
+.ovllab{font-size:10.5px;font-weight:600;fill:var(--ovl)}
+svg{display:block;width:100%;height:auto;touch-action:none}
+.gridline{stroke:var(--grid);stroke-width:1}
+.axisline{stroke:var(--axis);stroke-width:1}
+.tick{fill:var(--ink-3);font-size:11px}
+.tick.y{text-anchor:end}
+.tick.x{text-anchor:middle}
+.line{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.lim{stroke-width:1.5;stroke-dasharray:5 4;fill:none}
+.limlab{font-size:10.5px;font-weight:600}
+.endlab{font-size:11.5px;font-weight:600}
+.xhair{stroke:var(--ink-3);stroke-width:1;stroke-dasharray:3 3;opacity:0}
+.focus{opacity:0}
+.selrect{fill:var(--s1);opacity:.14}
+.hitarea{fill:transparent;cursor:crosshair}
+
+/* ---- tooltip ------------------------------------------------------------ */
+#tip{
+  position:fixed;pointer-events:none;z-index:60;opacity:0;transition:opacity .08s;
+  background:var(--surface);border:1px solid var(--edge);border-radius:9px;
+  padding:9px 11px;font-size:12.5px;min-width:190px;
+  box-shadow:0 6px 22px rgba(0,0,0,.16);
+}
+#tip .th{font-weight:650;margin-bottom:6px;font-variant-numeric:tabular-nums}
+#tip table{border-collapse:collapse;width:100%}
+#tip td{padding:1px 0;white-space:nowrap}
+#tip td.n{text-align:right;padding-left:14px;font-variant-numeric:tabular-nums;font-weight:600}
+#tip td.l{color:var(--ink-2)}
+#tip i{display:inline-block;width:9px;height:2px;border-radius:1px;margin-right:6px;vertical-align:3px}
+
+/* ---- table -------------------------------------------------------------- */
+details{border:1px solid var(--edge);border-radius:11px;background:var(--panel);margin:18px 0;padding:0}
+summary{cursor:pointer;padding:12px 14px;font-weight:600;font-size:13.5px}
+.tblwrap{overflow-x:auto;max-height:460px;overflow-y:auto;border-top:1px solid var(--edge)}
+table.data{border-collapse:collapse;font-size:12px;width:100%;font-variant-numeric:tabular-nums}
+table.data th,table.data td{padding:5px 10px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--edge)}
+table.data th{position:sticky;top:0;background:var(--panel-2);text-align:right;font-weight:600;z-index:1}
+table.data td:first-child,table.data th:first-child{text-align:left}
+
+.empty{color:var(--ink-2);padding:40px 0;text-align:center}
+code{background:var(--panel-2);padding:1px 5px;border-radius:4px;font-size:12.5px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hdr">
+    <h1>Haltune <span>· NSP log dashboard</span></h1>
+    <select id="logsel" aria-label="Choose log"></select>
+    <span class="grow"></span>
+    <button id="theme" title="Toggle light / dark">Theme</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="meta" id="meta"></div>
+
+  <div class="controls">
+    <button id="reset" disabled>Reset zoom</button>
+    <span class="hint" id="range">Drag across any chart to zoom the time axis</span>
+  </div>
+
+  <div class="tiles" id="tiles"></div>
+  <div class="drag" id="drag"></div>
+  <div class="warns" id="warns"></div>
+  <div id="tslider"></div>
+  <div class="picker" id="picker"></div>
+  <div id="charts"></div>
+
+  <details id="tabledet">
+    <summary>Data table</summary>
+    <div class="tblwrap"><table class="data" id="table"></table></div>
+  </details>
+</div>
+
+<div id="tip" role="status" aria-live="polite"></div>
+
+<script>
+/* ============================================================ state + utils */
+const S = { data:null, i0:0, i1:0, hover:null, mode:{}, overlay:{}, picked:null };
+try { S.picked = JSON.parse(localStorage.getItem('haltune.picked') || 'null'); } catch (e) { S.picked = null; }
+try { S.mode = JSON.parse(localStorage.getItem('haltune.mode') || '{}'); } catch (e) { S.mode = {}; }
+try { S.overlay = JSON.parse(localStorage.getItem('haltune.overlay') || '{}'); } catch (e) { S.overlay = {}; }
+
+/* view() lives in src/charts.js — it is part of the chart engine. */
+const $ = s => document.querySelector(s);
+const el = (t, cls) => { const n = document.createElement(t); if (cls) n.className = cls; return n; };
+/*__CHARTS__*/
+
+/* ==================================================================== load */
+async function boot(){
+  const r = await fetch('/api/logs').then(x => x.json());
+  const sel = $('#logsel');
+  if (!r.exists || !r.logs.length){
+    $('#charts').innerHTML = '<div class="empty">No CSV logs found in<br><code>' +
+      r.dir + '</code><br><br>Restart with <code>--dir "&lt;path&gt;"</code>.</div>';
+    return;
+  }
+  sel.innerHTML = r.logs.map(l => '<option value="' + l.file + '">' + l.file + '</option>').join('');
+  sel.onchange = () => load(sel.value);
+  load(r.logs[0].file);
+}
+
+async function load(file){
+  $('#charts').innerHTML = '<div class="empty">Parsing ' + file + ' …</div>';
+  const d = await fetch('/api/log?file=' + encodeURIComponent(file)).then(x => x.json());
+  if (d.error){ $('#charts').innerHTML = '<div class="empty">' + d.error + '</div>'; return; }
+  S.data = d; S.i0 = 0; S.i1 = d.t.length - 1;
+  $('#reset').disabled = true;
+  renderMeta(); renderTiles(); renderDrag(); renderWarnings(); renderPicker(); renderCharts(); renderTable();
+}
+
+/* =================================================================== chrome */
+function renderMeta(){
+  const d = S.data, dur = (d.t[d.t.length-1] - d.t[0]).toFixed(2);
+  const bits = [
+    ['Log', d.meta['Log Number'] || '—'],
+    ['Downloaded', d.meta.DownloadDateTime || '—'],
+    ['Duration', dur + ' s'],
+    ['Samples', d.t.length.toLocaleString()],
+    ['Channels', d.channelCount],
+  ];
+  $('#meta').innerHTML = bits.map(b => '<span>' + b[0] + ' <b>' + b[1] + '</b></span>').join('');
+}
+
+function renderTiles(){
+  const s = S.data.stats;
+  const order = ['knock','ethanol','peakBoost','peakRpm','peakDuty','fuelDemand','flowLoss',
+                 'minDiff','worstLean','rail5v','batteryLow','coolantPeak'];
+  $('#tiles').innerHTML = order.map(k => {
+    const t = s[k]; if (!t) return '';
+    const v = (t.value === null || t.value === undefined) ? '—' : fmt(t.value);
+    return '<div class="tile st-' + (t.status||'none') + '">' +
+      '<div class="k"><span class="dot"></span>' + (t.label||k) + '</div>' +
+      '<div class="v">' + v + (t.unit && t.value !== null ? '<u>' + t.unit + '</u>' : '') + '</div>' +
+      '<div class="n">' + (t.note||'') + '</div></div>';
+  }).join('');
+}
+
+/* Three-line run summary. Rows and formatting come from dragTable() in core.js,
+ * so this and the artifact's table cannot disagree about the same run. The
+ * launch-type line is load-bearing: a rolling-start time is not a drag split. */
+function renderDrag(){
+  const d = S.data.drag, c = S.data.cel;
+  const haveD = d && d.available, haveC = c && c.available;
+  if (!haveD && !haveC){ $('#drag').innerHTML = ''; return; }
+
+  const head = !haveD ? '' : (d.rollingStart
+    ? '<b>Rolling start</b> — log opens at <b>' + d.startSpeedKmh.toFixed(1) + ' km/h</b>, already '
+      + 'moving. Distance runs from 0 ft at the start of the recording, so these are times to '
+      + 'travel that far, <b>not</b> drag splits from a launch.'
+    : '<b>Standing start</b> — timing begins the instant movement is detected, at 0 km/h.');
+
+  const left = !haveD ? '' :
+    '<div class="dcol"><div class="dcap">Drag splits</div>'
+    + '<table class="dtab"><tr><th>Time</th><th>Distance</th><th>Speed</th></tr>'
+    + d.rows.map(r => '<tr><td>' + (r.time === 'NA' ? '<i>NA</i>' : r.time + ' s')
+      + '</td><td class="d">' + r.dist + '</td><td>'
+      + (r.speed === 'NA' ? '<i>NA</i>' : r.speed + ' km/h') + '</td></tr>').join('')
+    + '</table>'
+    + '<div class="dnote">Integrated from ' + d.channel + ' — run covered '
+    + d.totalFt.toFixed(0) + ' ft. NA means the run ended before that mark.</div></div>';
+
+  $('#drag').innerHTML =
+    (head ? '<div class="dhead' + (d.rollingStart ? ' roll' : '') + '">' + head + '</div>' : '')
+    + '<div class="dcols">' + left + celCol(c, haveC) + '</div>';
+}
+
+/* The lamp column. Rows, labels and the Flicker/Solid call all come from
+ * celCauses() in core.js — this only decides what it looks like. A log where
+ * the lamp never lit says so out loud rather than rendering an empty table,
+ * because an empty table reads as "not measured" and not as "nothing wrong". */
+function celCol(c, haveC){
+  if (!haveC) return '';
+  const body = c.rows.length
+    ? '<table class="dtab ctab"><tr><th class="d">Cause</th><th>Engine prot.</th>'
+      + '<th>Events</th><th>Occurrence</th><th class="d">Time</th></tr>'
+      + c.rows.map(r => '<tr><td class="c' + (r.named ? '' : ' raw') + '">' + r.cause + '</td>'
+        + '<td' + (r.protection === 'Yes' ? ' class="y"' : '') + '>' + r.protection + '</td>'
+        + '<td>' + r.events + '</td>'
+        + '<td' + (r.occurrence === 'Solid' ? ' class="solid"' : '') + '>' + r.occurrence + '</td>'
+        + '<td class="w">' + r.when + '</td></tr>').join('')
+      + '</table>'
+    : '<div class="cclear">Lamp never lit in this log.</div>';
+  return '<div class="dcol"><div class="dcap">Check engine light</div>' + body
+    + '<div class="dnote">' + c.note + '</div></div>';
+}
+
+function renderWarnings(){
+  const w = S.data.warnings || [];
+  if (!w.length){ $('#warns').innerHTML = ''; return; }
+  $('#warns').innerHTML = w.map(x => {
+    const cls = x.severity === 'critical' ? 'critical' : x.severity === 'warn' ? 'warn-lvl' : 'info';
+    const tag = x.severity === 'critical' ? 'CRITICAL' : x.severity === 'warn' ? 'WARNING' : 'INFO';
+    return '<div class="warn ' + cls + '"><span class="ico">' + tag + '</span><div>' +
+      '<div class="tt">' + x.title + '</div><div class="dd">' + x.detail + '</div>' +
+      (x.blocking ? '<div class="blk">Blocking — samples in this region are excluded from fuel corrections</div>' : '') +
+      '</div></div>';
+  }).join('');
+}
+
+
+
+/* ==================================================================== theme */
+$('#theme').onclick = () => {
+  const cur = document.documentElement.getAttribute('data-theme');
+  const sysDark = matchMedia('(prefers-color-scheme: dark)').matches;
+  const next = cur ? (cur === 'dark' ? 'light' : 'dark') : (sysDark ? 'light' : 'dark');
+  document.documentElement.setAttribute('data-theme', next);
+  if (S.data){ renderCharts(); paintHover(); }
+};
+
+boot();
+</script>
+</body>
+</html>
